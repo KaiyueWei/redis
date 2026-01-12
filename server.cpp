@@ -27,7 +27,10 @@ static void die(const char *msg){
 	fprintf(stderr, "[%d] %s\n", errno, msg);	
 	abort();
 }
-
+/*
+ * No-blocking set up
+ * read and write never blocks
+ */
 static void fd_set_nb(int fd){
 	errno = 0;
 	int flags = fcntl(fd, F_GETFL, 0);
@@ -46,7 +49,16 @@ static void fd_set_nb(int fd){
 
 const size_t k_max_msg = 32 << 20; // likerly larger tah the kernel buffer
 
-
+/*
+ * Each connection has:
+ * 1). state flags: this tells the event loop what to poll for
+ * 	want_read -> poll for POLLIN
+ * 	want_write -> poll for POLLOUT
+ * 	want_close -> close socket
+ * 2). buffers
+ * 	incoming: raw bytes read fro socket
+ * 	outgoing: bytes waiting to be written
+ */
 struct Conn {
 	int fd = -1;
 	// application's intention, for the event loop
@@ -70,7 +82,14 @@ static void buf_consume(std::vector<uint8_t> &buf, size_t n){
 	buf.erase(buf.begin(), buf.begin() + n);
 }
 
-// application callback when the listening socket is ready
+/*
+ *  accept new connections
+ *  steps:
+ *  1). accept() new client
+ *  2). set non-blocking
+ *  3). allocate conn
+ *  4). start with want_read = true
+ */
 static Conn *handle_accept(int fd){
 	// accept
 	struct sockaddr_in client_addr = {};
@@ -122,7 +141,18 @@ static int32_t write_all(int fd, const char *buf, size_t n){
 	return 0;
 }
 */
-// process 1 request if there is enough data
+
+/* process 1 request if there is enough data
+ * consumes exactly one request
+ * true -> successfully parsed one request
+ * false -> need more data or error
+ * steps:
+ * 1). check header
+ * 2). read length
+ * 3). check full body
+ * 4). application logic (echo for now)
+ * 5). consume input
+ */
 static bool try_one_request(Conn *conn){
 	// try to parse the protocol: message header
 	if (conn->incoming.size() < 4){
@@ -167,7 +197,11 @@ static void do_something(int connfd){
 }
 */
 
-// application callback when the socket is writable
+/* application callback when the socket is writable
+ * write as much as kernel accepts
+ * partial writes are normal
+ * remaining bytes stay in outgoing
+ */
 static void handle_write(Conn *conn){
 	assert(conn->outgoing.size() > 0);
 	ssize_t rv = write(conn->fd, &conn->outgoing[0], conn->outgoing.size());
@@ -191,7 +225,16 @@ static void handle_write(Conn *conn){
 
 }
 
-// application callback when the socket is readable
+/*
+ * application callback when the socket is readable
+ * step:
+ * 1). read as much as possible, might read:
+ * - half a request 
+ * - one request 
+ * - many requests
+ * 2). append to input buffer
+ * 3). parse requests in a loop 
+ */
 static void handle_read(Conn *conn){
 	// read some data
 	uint8_t buf[64 * 1024];

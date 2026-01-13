@@ -68,7 +68,7 @@ static int32_t send_req(int fd, const uint8_t *text, size_t len){
 	std::vector<uint8_t> wbuf;
 	buf_append(wbuf, (const uint8_t *)&len, 4);
 	buf_append(wbuf, text, len);
-	return write(fd, wbuf.data(), wbuf.size());
+	return write_all(fd, wbuf.data(), wbuf.size());
 }
 
 static int32_t read_res(int fd){
